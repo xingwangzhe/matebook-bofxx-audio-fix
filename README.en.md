@@ -6,6 +6,10 @@ Linux on one HUAWEI BoF-XX system exposed an ES8336 playback device and a PipeWi
 
 This repository packages that observed workaround as a guarded systemd oneshot service and systemd resume hook. It is **not a Linux driver**, does not use the Windows ISST installer, and does not change PipeWire/WirePlumber routing, the default output, or Bluetooth configuration.
 
+## Related article
+
+Read the full diagnosis, hardware identification, register verification, and persistent fix in [HUAWEI MateBook D 15 2022（BoF-XX-PCB）Ubuntu Linux 外放无声修复](https://xingwangzhe.fun/posts/matebook-d15-bofxx-hwsp0001-no-speaker/) (Chinese).
+
 ## Verified system
 
 | Item | Observed value |

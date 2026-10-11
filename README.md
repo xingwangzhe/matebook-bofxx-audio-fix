@@ -6,6 +6,10 @@
 
 本仓库将这项已在该机器上验证的处理方式封装为带硬件检查的 systemd oneshot 服务和恢复钩子。它**不是 Linux 驱动**，不运行 Windows ISST 安装程序，不修改 PipeWire/WirePlumber 路由、默认输出或蓝牙配置。
 
+## 配套博文
+
+完整排查过程、硬件识别、寄存器验证与持久化修复记录见：[HUAWEI MateBook D 15 2022（BoF-XX-PCB）Ubuntu Linux 外放无声修复](https://xingwangzhe.fun/posts/matebook-d15-bofxx-hwsp0001-no-speaker/)。
+
 ## 已验证的机器
 
 | 项目 | 实测信息 |
