@@ -1,82 +1,84 @@
-# Huawei MateBook BoF-XX Linux speaker fix
+# Huawei MateBook BoF-XX Linux 外放修复
 
-Linux on one HUAWEI BoF-XX system exposed an ES8336 playback device and a PipeWire Speakers sink, but the internal speakers were silent. The machine also exposed a separate ACPI device named `HWSP0001:00`. On this specific system, initializing the two I2C devices at addresses `0x58` and `0x5b` on bus 3 restored audible speaker output.
+[English](README.en.md) | 简体中文
 
-This repository packages that observed workaround as a guarded systemd oneshot service and systemd resume hook. It is **not a Linux driver**, does not use the Windows ISST installer, and does not change PipeWire/WirePlumber routing, the default output, or Bluetooth configuration.
+在一台 HUAWEI BoF-XX 上，Linux 能识别 ES8336 播放设备，PipeWire 也提供 Speakers 输出，但内置扬声器没有声音。这台机器还枚举出独立的 ACPI 设备 `HWSP0001:00`。在这台特定机器上，向 I²C 总线 3 上地址为 `0x58` 和 `0x5b` 的两颗器件初始化后，内置扬声器恢复了声音。
 
-## Verified system
+本仓库将这项已在该机器上验证的处理方式封装为带硬件检查的 systemd oneshot 服务和恢复钩子。它**不是 Linux 驱动**，不运行 Windows ISST 安装程序，不修改 PipeWire/WirePlumber 路由、默认输出或蓝牙配置。
 
-| Item | Observed value |
+## 已验证的机器
+
+| 项目 | 实测信息 |
 | --- | --- |
-| Huawei product family | HUAWEI MateBook D 15 2022 12th Gen Intel Core family, officially mapped by Huawei to product code `BoF` |
-| Linux DMI product / version | `BoF-XX` / `M1010` |
-| Linux DMI board | `BoF-XX-PCB` |
-| OS and kernel during test | Ubuntu 26.04.1 LTS, `7.0.0-38-generic` |
-| Audio controller | Intel Alder Lake PCH-P HDA, PCI ID `8086:51c8` |
-| Kernel audio path | SOF (`sof-audio-pci-intel-tgl`) with ES8336 codec (`sof-essx8336`) |
-| Additional ACPI device | `HWSP0001:00` on I2C bus 3 |
-| Amplifier addresses observed | `0x58`, `0x5b`; register `0x00` read `0x5a` on both |
+| 华为产品系列 | HUAWEI MateBook D 15 2022 第 12 代 Intel Core 系列；华为官方支持设备列表将产品代码 `BoF` 对应到该系列 |
+| Linux DMI 产品名 / 版本 | `BoF-XX` / `M1010` |
+| Linux DMI 主板名 | `BoF-XX-PCB` |
+| 测试时的系统 / 内核 | Ubuntu 26.04.1 LTS，`7.0.0-38-generic` |
+| 音频控制器 | Intel Alder Lake PCH-P HDA，PCI ID `8086:51c8` |
+| 内核音频链路 | SOF（`sof-audio-pci-intel-tgl`）和 ES8336 codec（`sof-essx8336`） |
+| 额外 ACPI 设备 | `HWSP0001:00`，位于 I²C 总线 3 |
+| 实测功放地址 | `0x58`、`0x5b`；两者寄存器 `0x00` 均读为 `0x5a` |
 
-The commercial model mapping comes from Huawei's [supported-device listing](https://consumer.huawei.com/cn/support/content/zh-cn15945089/). `BoF-XX` is the DMI string on the tested machine; the software checks exact local DMI values rather than assuming every MateBook D 15 has the same board.
+产品系列对应关系参考华为[支持设备列表](https://consumer.huawei.com/cn/support/content/zh-cn15945089/)。`BoF-XX` 是本机 DMI 字符串；脚本检查本机的精确 DMI 值，不假设所有 MateBook D 15 都使用相同主板。
 
-## Diagnosis and evidence
+## 排查过程与证据
 
-The kernel successfully created the `sof-essx8336` ALSA card and PipeWire exposed a Speakers sink. The SOF firmware and `sof-adl-es8336-dmic2ch-ssp0.tplg` topology loaded, so the first failure was not a missing Windows driver or an absent Linux sound card. The supplied Windows archive contained an `ISST_10.29.0.7767.exe`; it is a Windows installer, not a Linux kernel module.
+内核成功创建了 `sof-essx8336` ALSA 声卡，PipeWire 也暴露了 Speakers 输出。SOF firmware 和 `sof-adl-es8336-dmic2ch-ssp0.tplg` topology 均已加载，因此问题不是“Linux 完全没有识别声卡”，也不是缺少 Windows 驱动。用户提供的 Windows 压缩包中包含 `ISST_10.29.0.7767.exe`，这是 Windows 安装程序，不能作为 Linux 内核模块使用。
 
-The system had a separate ACPI device, `HWSP0001:00`, but no bound Linux I2C driver. Read-only inspection found devices at `0x58` and `0x5b` on bus 3. Before initialization, both returned `0x5a` at register `0x00` and `0x38` at register `0x01`. After applying the profile below, register `0x01` read `0x69` on both; the owner then confirmed audible internal-speaker output.
+系统还枚举出独立的 `HWSP0001:00`，但没有绑定 Linux I²C 驱动。只读检查发现总线 3 上的 `0x58`、`0x5b` 器件：初始化前两者的寄存器 `0x00` 均为 `0x5a`、寄存器 `0x01` 均为 `0x38`。应用下方配置后，两者的寄存器 `0x01` 读回 `0x69`；用户随后确认内置扬声器恢复了声音。
 
-The values were informed by an [experimental upstream RFC patch](https://patchew.org/linux/20260614161028.10405-1-tgaraev653@gmail.com/) and a community [BOD-WXX9 speaker investigation](https://github.com/MaximushkaBed/huawei-matebook-d15-speaker-fix). Those sources concern other boards. The BOD-specific values were not assumed to be universally compatible: they were first tested on the BoF-XX machine, where profile writes restored sound. On this hardware, writes to registers `0x03` and `0x59` did not retain the proposed values on readback (`0x0c` and `0x00`, respectively); the script still sends those writes but verifies all other profile registers.
+配置参考了一份[上游实验性 RFC 补丁](https://patchew.org/linux/20260614161028.10405-1-tgaraev653@gmail.com/)和社区的 [BOD-WXX9 外放排查](https://github.com/MaximushkaBed/huawei-matebook-d15-speaker-fix)。这两份材料讨论的是其他主板，本仓库没有把 BOD 专用参数直接当作通用配置：寄存器配置先在本文记录的 BoF-XX 机器上实测，确认写入后外放恢复。该机器上寄存器 `0x03` 和 `0x59` 的读回值分别为 `0x0c` 和 `0x00`，不会保留建议写入的值；脚本仍发送这两项写入，但会跳过它们的读回比对。
 
-## Install
+## 安装
 
-Requirements: systemd, Bash, `i2c-tools`, and the exact tested DMI / I2C layout. Install `i2c-tools` with the distribution package manager if `i2cget` or `i2cset` is missing. From a clone of this repository:
+依赖：systemd、Bash、`i2c-tools`，以及与测试机器完全匹配的 DMI / I²C 布局。若缺少 `i2cget` 或 `i2cset`，请先用发行版的软件包管理器安装 `i2c-tools`。在本仓库克隆目录中运行：
 
-```bash title="Install on the verified BoF-XX system"
+```bash title="在已验证的 BoF-XX 机器上安装"
 pkexec bash "$(pwd)/scripts/install.sh"
 ```
 
-The installer refuses a different vendor, product, board, bus layout, bound kernel driver, or unexpected device value. The runtime script repeats these checks before every write. It writes 14 register/value pairs to each of `0x58` and `0x5b`, then reads back the writable profile registers.
+安装器会拒绝不匹配的厂商、产品名、主板、总线布局、已绑定的内核驱动或异常器件标识值。运行时初始化脚本在每次写入前也会重新检查。它会向 `0x58`、`0x5b` 各写入 14 组寄存器/数值，然后读取并验证可读回的配置寄存器。
 
-The systemd service initializes the amplifier at boot. The sleep hook runs the same guarded script after systemd resumes the machine. The scripts do not call `wpctl`, `pactl`, PipeWire, or WirePlumber and do not set an output device; choose internal speakers or Bluetooth through the desktop audio settings as usual.
+systemd 服务在开机时初始化功放；睡眠恢复钩子会在系统恢复后调用同一个受检查的脚本。脚本不会调用 `wpctl`、`pactl`、PipeWire 或 WirePlumber，也不会选择输出设备。你仍可像平常一样在桌面音频设置中选择内置扬声器或蓝牙设备。
 
-## Verify and remove
+## 验证与卸载
 
-```bash title="Check the service and output devices"
+```bash title="查看服务状态、日志和输出设备"
 systemctl status matebook-hwsp-init.service
 journalctl -u matebook-hwsp-init.service -b
 wpctl status
 ```
 
-For a manual test tone, select the internal Speakers sink in the desktop audio settings, unmute it, then run:
+手动测试音时，请先在桌面音频设置中选择 Speakers sink 并解除静音，然后运行：
 
-```bash title="Play a short internal speaker test"
+```bash title="播放短暂的内置扬声器测试音"
 speaker-test -D 'plughw:CARD=sofessx8336,DEV=0' -c 2 -t sine -f 440
 ```
 
-Stop the test with `Ctrl+C`. A running audio stream alone does not prove that the physical speakers are audible; listen at the machine.
+按 `Ctrl+C` 停止。音频流正在播放并不能证明物理扬声器确实发声，请在电脑旁实际听音确认。
 
-Remove only this repository's automation with:
+只卸载本仓库新增的自动化配置：
 
-```bash title="Remove the boot and resume automation"
+```bash title="移除开机和恢复时的自动初始化"
 pkexec /usr/local/sbin/matebook-hwsp-uninstall
 ```
 
-Uninstallation removes the service, resume hook, and installed scripts. It leaves the current amplifier register state unchanged and does not change other audio configuration.
+卸载会移除服务、恢复钩子和已安装脚本；不会改动当前功放寄存器状态，也不会更改其他音频配置。
 
-## Limits and advice for other Huawei boards
+## 对其他华为主板的建议与限制
 
-- This workaround is validated on one `BoF-XX-PCB` machine. A MateBook D 15 name alone does not establish that another unit has the same codec, amplifier, I2C bus, addresses, DMI values, or register profile.
-- Do not copy the `BOD-WXX9` GPIO number, I2C bus number, or register profile to another Huawei board without checking that board's ACPI devices, sysfs I2C path, device reads, and board-specific evidence.
-- Start by recording `lspci -nnk`, `/proc/asound/cards`, `wpctl status`, DMI fields under `/sys/class/dmi/id/`, kernel audio logs, and ACPI codec/amplifier devices. Distinguish “no sound card”, “sound card exists but playback is silent”, and “headphone jack/routing problem”; they have different causes.
-- Avoid force-writing I2C registers while a kernel driver owns the device. This script exits if `HWSP0001:00` has a bound driver and uses exact DMI and observed-value guards before forcing access.
-- For a different board, capture its own read-only baseline and confirm the physical result before creating a persistent service. Treat experimental RFC patches and single-board community fixes as leads, not universal instructions.
+- 本方案只在一台 `BoF-XX-PCB` 机器上验证。仅凭 MateBook D 15 商品名，无法确认另一台机器使用相同 codec、功放、I²C 总线、器件地址、DMI 标识或寄存器配置。
+- 未核实目标主板前，不要照搬 `BOD-WXX9` 的 GPIO 编号、I²C 总线号或寄存器配置。先确认该机 ACPI 设备、sysfs I²C 路径、器件只读值及针对该主板的证据。
+- 建议先记录 `lspci -nnk`、`/proc/asound/cards`、`wpctl status`、`/sys/class/dmi/id/` 下的 DMI 字段、内核音频日志以及 ACPI codec/功放设备。要区分“没有声卡”“声卡存在但播放无声”和“耳机孔/路由问题”，它们的原因可能不同。
+- 若内核驱动已经占用器件，不要强制写 I²C 寄存器。本脚本会在 `HWSP0001:00` 已绑定驱动时退出，并在强制访问前检查精确 DMI 和观测到的器件值。
+- 对其他主板，先做只读基线采集，并单独验证实际外放结果，再考虑持久化服务。实验性 RFC 和单机社区方案适合作为调查线索，不能直接视为通用修复。
 
-## References
+## 参考资料
 
-- Huawei, [supported device and product-code listing](https://consumer.huawei.com/cn/support/content/zh-cn15945089/)
-- Linux sound mailing-list archive, [HWSP0001 support RFC](https://patchew.org/linux/20260614161028.10405-1-tgaraev653@gmail.com/) — experimental discussion, not an upstream driver
-- Community investigation, [MateBook D15 BOD-WXX9 speaker amplifier fix](https://github.com/MaximushkaBed/huawei-matebook-d15-speaker-fix) — different board; use only as comparative evidence
+- 华为：[支持设备及产品代码列表](https://consumer.huawei.com/cn/support/content/zh-cn15945089/)
+- Linux sound 邮件列表归档：[HWSP0001 支持 RFC](https://patchew.org/linux/20260614161028.10405-1-tgaraev653@gmail.com/)——实验性讨论，并非已合入上游的驱动
+- 社区排查：[MateBook D 15 BOD-WXX9 功放修复](https://github.com/MaximushkaBed/huawei-matebook-d15-speaker-fix)——不同主板，只作为对照材料
 
-## License
+## 许可证
 
-MIT. See [LICENSE](LICENSE).
+MIT，详见 [LICENSE](LICENSE)。
