@@ -1,0 +1,57 @@
+#!/bin/bash
+set -euo pipefail
+
+TAG="matebook-hwsp-init"
+log() { logger -t "$TAG" -- "$*"; printf '%s\n' "$*"; }
+fail() { log "ERROR: $*"; exit 1; }
+
+# This profile was validated only on HUAWEI BoF-XX / BoF-XX-PCB.
+[[ $(< /sys/class/dmi/id/sys_vendor) == HUAWEI ]] || fail "vendor mismatch; refusing I2C writes"
+[[ $(< /sys/class/dmi/id/product_name) == BoF-XX ]] || fail "product mismatch; refusing I2C writes"
+[[ $(< /sys/class/dmi/id/board_name) == BoF-XX-PCB ]] || fail "board mismatch; refusing I2C writes"
+
+device=/sys/bus/i2c/devices/i2c-HWSP0001:00
+[[ -e $device ]] || fail "HWSP0001 ACPI I2C device not present"
+resolved=$(readlink -f "$device")
+[[ $resolved == /sys/devices/*/i2c-3/i2c-HWSP0001:00 ]] || fail "HWSP0001 is not on expected I2C bus 3 ($resolved)"
+[[ ! -L $device/driver ]] || fail "HWSP0001 has a bound kernel driver; refusing forced I2C access"
+[[ -c /dev/i2c-3 ]] || fail "I2C bus 3 device node is missing"
+command -v i2cget >/dev/null || fail "i2cget is unavailable"
+command -v i2cset >/dev/null || fail "i2cset is unavailable"
+
+# Both observed addresses must return the expected register-0 value. Register
+# 0x01 must be either the observed silent state or the initialized state.
+for addr in 0x58 0x5b; do
+  id=$(i2cget -y -f 3 "$addr" 0x00) || fail "cannot read device at $addr"
+  [[ ${id,,} == 0x5a ]] || fail "unexpected register 0x00 value $id at $addr"
+  state=$(i2cget -y -f 3 "$addr" 0x01) || fail "cannot read register 0x01 at $addr"
+  case ${state,,} in
+    0x38|0x69) ;;
+    *) fail "unexpected register 0x01 value $state at $addr; refusing writes" ;;
+  esac
+done
+
+profile=(
+  "01 69" "03 16" "04 80" "05 0c" "06 11" "07 93"
+  "09 0b" "0b 4b" "0c 00" "0d 77" "0f 51" "10 58"
+  "58 00" "59 80"
+)
+for addr in 0x58 0x5b; do
+  for pair in "${profile[@]}"; do
+    read -r reg value <<< "$pair"
+    i2cset -y -f 3 "$addr" "0x$reg" "0x$value" || fail "write failed: $addr register 0x$reg"
+  done
+done
+
+for addr in 0x58 0x5b; do
+  for pair in "${profile[@]}"; do
+    read -r reg value <<< "$pair"
+    # On the validated BoF-XX system, these two registers do not retain the
+    # proposed profile values on readback: 0x03 reads 0x0c; 0x59 reads 0x00.
+    # The writes are kept because the complete profile restored audible output.
+    case $reg in 03|59) continue ;; esac
+    actual=$(i2cget -y -f 3 "$addr" "0x$reg") || fail "cannot verify $addr register 0x$reg"
+    [[ ${actual,,} == "0x$value" ]] || fail "verification failed at $addr register 0x$reg: got $actual"
+  done
+done
+log "HWSP0001 restore profile applied and verified on I2C bus 3 (0x58, 0x5b)"
