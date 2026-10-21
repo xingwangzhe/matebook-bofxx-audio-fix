@@ -46,10 +46,16 @@ done
 for addr in 0x58 0x5b; do
   for pair in "${profile[@]}"; do
     read -r reg value <<< "$pair"
-    # On the validated BoF-XX system, these two registers do not retain the
-    # proposed profile values on readback: 0x03 reads 0x0c; 0x59 reads 0x00.
-    # The writes are kept because the complete profile restored audible output.
+    # Register 0x03 does not retain the profile value on either address
+    # (reads 0x0c). Register 0x59 is a status register: its readback varies
+    # between observations on the same boot (0x88, 0x80, 0x00), so it cannot
+    # serve as a verification target. The writes are kept because the
+    # complete profile restored audible output.
     case $reg in 03|59) continue ;; esac
+    # The amplifier at 0x58 does not retain register 0x58 (reads 0x08), while
+    # the one at 0x5b reads back 0x00. Skip only that address/register pair so
+    # the check stays strict wherever readback is meaningful.
+    case "$addr:$reg" in 0x58:58) continue ;; esac
     actual=$(i2cget -y -f 3 "$addr" "0x$reg") || fail "cannot verify $addr register 0x$reg"
     [[ ${actual,,} == "0x$value" ]] || fail "verification failed at $addr register 0x$reg: got $actual"
   done

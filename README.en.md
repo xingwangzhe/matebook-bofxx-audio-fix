@@ -31,7 +31,15 @@ The kernel successfully created the `sof-essx8336` ALSA card and PipeWire expose
 
 The system had a separate ACPI device, `HWSP0001:00`, but no bound Linux I2C driver. Read-only inspection found devices at `0x58` and `0x5b` on bus 3. Before initialization, both returned `0x5a` at register `0x00` and `0x38` at register `0x01`. After applying the profile below, register `0x01` read `0x69` on both; the owner then confirmed audible internal-speaker output.
 
-The values were informed by an [experimental upstream RFC patch](https://patchew.org/linux/20260614161028.10405-1-tgaraev653@gmail.com/) and a community [BOD-WXX9 speaker investigation](https://github.com/MaximushkaBed/huawei-matebook-d15-speaker-fix). Those sources concern other boards. The BOD-specific values were not assumed to be universally compatible: they were first tested on the BoF-XX machine, where profile writes restored sound. On this hardware, writes to registers `0x03` and `0x59` did not retain the proposed values on readback (`0x0c` and `0x00`, respectively); the script still sends those writes but verifies all other profile registers.
+The values were informed by an [experimental upstream RFC patch](https://patchew.org/linux/20260614161028.10405-1-tgaraev653@gmail.com/) and a community [BOD-WXX9 speaker investigation](https://github.com/MaximushkaBed/huawei-matebook-d15-speaker-fix). Those sources concern other boards. The BOD-specific values were not assumed to be universally compatible: they were first tested on the BoF-XX machine, where profile writes restored sound.
+
+Readback behaviour is recorded per device because the two are not identical:
+
+- Register `0x03` does not retain the value on either device; both read `0x0c`.
+- Register `0x59` behaves as a status register: its value varies within a single boot (observed `0x88`, `0x80`, `0x00`), so it cannot be used for verification.
+- Register `0x58` is not retained by the `0x58` device (reads `0x08`), while the `0x5b` device reads back `0x00`.
+
+The script therefore still sends these writes, but skips only the combinations that cannot be verified (`0x03`, `0x59`, and register `0x58` on the `0x58` device). Every other profile register is still compared against its written value.
 
 ## Install
 
