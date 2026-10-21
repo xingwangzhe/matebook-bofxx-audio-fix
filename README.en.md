@@ -36,10 +36,12 @@ The values were informed by an [experimental upstream RFC patch](https://patchew
 Readback behaviour is recorded per device because the two are not identical:
 
 - Register `0x03` does not retain the value on either device; both read `0x0c`.
-- Register `0x59` behaves as a status register: its value varies within a single boot (observed `0x88`, `0x80`, `0x00`), so it cannot be used for verification.
+- Register `0x59` settles at `0x00` on both devices, but reads `0x88` / `0x80` in the short window immediately after the profile writes. Because the verification loop runs right after those writes, it sits inside that transient, so this register is not used for verification.
 - Register `0x58` is not retained by the `0x58` device (reads `0x08`), while the `0x5b` device reads back `0x00`.
 
 The script therefore still sends these writes, but skips only the combinations that cannot be verified (`0x03`, `0x59`, and register `0x58` on the `0x58` device). Every other profile register is still compared against its written value.
+
+Playback does not rewrite these registers: snapshotting `0x00`, `0x01`, `0x03`, `0x58` and `0x59` on both devices before and after a 3-second 440 Hz test tone produced 10 identical readings, unchanged when re-checked several minutes later. The profile written by the script stays in effect during playback.
 
 ## Install
 
