@@ -6,6 +6,8 @@ Linux on one HUAWEI BoF-XX system exposed an ES8336 playback device and a PipeWi
 
 This repository packages that observed workaround as a guarded systemd oneshot service and systemd resume hook. It is **not a Linux driver**, does not use the Windows ISST installer, and does not change PipeWire/WirePlumber routing, the default output, or Bluetooth configuration.
 
+> 2026-11-02 recheck: hibernation resume ran both the sleep hook and the boot service successfully on the tested machine; the repository now also checks DMI versions, drops the deprecated udev-settle dependency, and restarts the service on reinstall.
+
 ## Related article
 
 Read the full diagnosis, hardware identification, register verification, and persistent fix in [HUAWEI MateBook D 15 2022（BoF-XX-PCB）Ubuntu Linux 外放无声修复](https://xingwangzhe.fun/posts/matebook-d15-bofxx-hwsp0001-no-speaker/) (Chinese).
@@ -16,18 +18,18 @@ Read the full diagnosis, hardware identification, register verification, and per
 | --- | --- |
 | Huawei product family | HUAWEI MateBook D 15 2022 12th Gen Intel Core family, officially mapped by Huawei to product code `BoF` |
 | Linux DMI product / version | `BoF-XX` / `M1010` |
-| Linux DMI board | `BoF-XX-PCB` |
+| Linux DMI board / version | `BoF-XX-PCB` / `M1010` |
 | OS and kernel during test | Ubuntu 26.04.1 LTS, `7.0.0-38-generic` |
 | Audio controller | Intel Alder Lake PCH-P HDA, PCI ID `8086:51c8` |
 | Kernel audio path | SOF (`sof-audio-pci-intel-tgl`) with ES8336 codec (`sof-essx8336`) |
 | Additional ACPI device | `HWSP0001:00` on I2C bus 3 |
 | Amplifier addresses observed | `0x58`, `0x5b`; register `0x00` read `0x5a` on both |
 
-The commercial model mapping comes from Huawei's [supported-device listing](https://consumer.huawei.com/cn/support/content/zh-cn15945089/). `BoF-XX` is the DMI string on the tested machine; the software checks exact local DMI values rather than assuming every MateBook D 15 has the same board.
+The commercial model mapping comes from Huawei's [supported-device listing](https://consumer.huawei.com/cn/support/content/zh-cn15945089/). `BoF-XX` is the DMI string on the tested machine; the software checks five exact DMI values (vendor, product name, product version, board name, and board version) rather than assuming every MateBook D 15 has the same board.
 
 ## Diagnosis and evidence
 
-The kernel successfully created the `sof-essx8336` ALSA card and PipeWire exposed a Speakers sink. The SOF firmware and `sof-adl-es8336-dmic2ch-ssp0.tplg` topology loaded, so the first failure was not a missing Windows driver or an absent Linux sound card. The supplied Windows archive contained an `ISST_10.29.0.7767.exe`; it is a Windows installer, not a Linux kernel module.
+The kernel successfully created the `sof-essx8336` ALSA card and PipeWire exposed a Speakers sink. The SOF firmware and `sof-adl-es8336-dmic2ch-ssp0.tplg` topology loaded, so the first failure was not a missing Windows driver or an absent Linux sound card. The supplied Windows archive contained an `ISST_10.29.0.7767.exe`. Unpacking the outer NSIS self-extractor with 7z reveals the inner `ISST_P99-022-002_v10.29.00.7767.exe`, which contains the Intel SST driver stack (`IntcSST.sys`, `IntcOED.sys`, `IntcSDW.sys`, `IntcDMic.sys`, `IntcAudioBus.sys`, and others), WoV models, and topology files; REA inspection of `IntcSST.sys` shows imports only from `ntoskrnl.exe`, `portcls.sys`, and `HAL.dll`. No `HWSP0001` or `ES8336` driver or strings were found in the package. It is neither loadable as a Linux kernel module nor a source of the amplifier initialization profile.
 
 The system had a separate ACPI device, `HWSP0001:00`, but no bound Linux I2C driver. Read-only inspection found devices at `0x58` and `0x5b` on bus 3. Before initialization, both returned `0x5a` at register `0x00` and `0x38` at register `0x01`. After applying the profile below, register `0x01` read `0x69` on both; the owner then confirmed audible internal-speaker output.
 
@@ -51,9 +53,9 @@ Requirements: systemd, Bash, `i2c-tools`, and the exact tested DMI / I2C layout.
 pkexec bash "$(pwd)/scripts/install.sh"
 ```
 
-The installer refuses a different vendor, product, board, bus layout, bound kernel driver, or unexpected device value. The runtime script repeats these checks before every write. It writes 14 register/value pairs to each of `0x58` and `0x5b`, then reads back the writable profile registers.
+The installer refuses a different vendor, product name, product version, board name, board version, bus layout, bound kernel driver, or unexpected device value. The runtime script repeats these checks before every write. It restarts the service after installation so the current profile is applied immediately, including on reinstall when the oneshot unit is already active. It writes 14 register/value pairs to each of `0x58` and `0x5b`, then reads back the writable profile registers.
 
-The systemd service initializes the amplifier at boot. The sleep hook runs the same guarded script after systemd resumes the machine. The scripts do not call `wpctl`, `pactl`, PipeWire, or WirePlumber and do not set an output device; choose internal speakers or Bluetooth through the desktop audio settings as usual.
+The systemd service initializes the amplifier at boot. The sleep hook runs the same guarded script after systemd resumes the machine. The unit no longer pulls in the deprecated `systemd-udev-settle.service`; the script waits briefly for `HWSP0001:00` and `/dev/i2c-3` instead. The scripts do not call `wpctl`, `pactl`, PipeWire, or WirePlumber and do not set an output device; choose internal speakers or Bluetooth through the desktop audio settings as usual.
 
 ## Verify and remove
 

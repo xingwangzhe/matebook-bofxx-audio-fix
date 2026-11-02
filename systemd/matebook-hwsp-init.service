@@ -1,9 +1,7 @@
 [Unit]
 Description=Initialize Huawei MateBook BoF-XX speaker amplifiers
 Documentation=https://patchew.org/linux/20260614161028.10405-1-tgaraev653@gmail.com/
-After=systemd-udev-settle.service sound.target
-Wants=systemd-udev-settle.service
-ConditionPathExists=/sys/bus/i2c/devices/i2c-HWSP0001:00
+After=sound.target
 
 [Service]
 Type=oneshot

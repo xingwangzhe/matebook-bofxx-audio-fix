@@ -5,19 +5,30 @@ TAG="matebook-hwsp-init"
 log() { logger -t "$TAG" -- "$*"; printf '%s\n' "$*"; }
 fail() { log "ERROR: $*"; exit 1; }
 
-# This profile was validated only on HUAWEI BoF-XX / BoF-XX-PCB.
+# This profile was validated only on HUAWEI BoF-XX / M1010 / BoF-XX-PCB / M1010.
 [[ $(< /sys/class/dmi/id/sys_vendor) == HUAWEI ]] || fail "vendor mismatch; refusing I2C writes"
 [[ $(< /sys/class/dmi/id/product_name) == BoF-XX ]] || fail "product mismatch; refusing I2C writes"
+[[ $(< /sys/class/dmi/id/product_version) == M1010 ]] || fail "product version mismatch; refusing I2C writes"
 [[ $(< /sys/class/dmi/id/board_name) == BoF-XX-PCB ]] || fail "board mismatch; refusing I2C writes"
+[[ $(< /sys/class/dmi/id/board_version) == M1010 ]] || fail "board version mismatch; refusing I2C writes"
+
+command -v i2cget >/dev/null || fail "i2cget is unavailable"
+command -v i2cset >/dev/null || fail "i2cset is unavailable"
 
 device=/sys/bus/i2c/devices/i2c-HWSP0001:00
+# The boot unit no longer pulls in the deprecated
+# systemd-udev-settle.service. Wait briefly for the ACPI I2C device and the
+# i2c-dev node instead, so probe-order changes at boot or resume do not turn
+# into a failed unit.
+for _ in {1..100}; do
+  [[ -e $device && -c /dev/i2c-3 ]] && break
+  sleep 0.1
+done
 [[ -e $device ]] || fail "HWSP0001 ACPI I2C device not present"
 resolved=$(readlink -f "$device")
 [[ $resolved == /sys/devices/*/i2c-3/i2c-HWSP0001:00 ]] || fail "HWSP0001 is not on expected I2C bus 3 ($resolved)"
 [[ ! -L $device/driver ]] || fail "HWSP0001 has a bound kernel driver; refusing forced I2C access"
 [[ -c /dev/i2c-3 ]] || fail "I2C bus 3 device node is missing"
-command -v i2cget >/dev/null || fail "i2cget is unavailable"
-command -v i2cset >/dev/null || fail "i2cset is unavailable"
 
 # Both observed addresses must return the expected register-0 value. Register
 # 0x01 must be either the observed silent state or the initialized state.

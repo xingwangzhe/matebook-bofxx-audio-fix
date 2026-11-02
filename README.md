@@ -6,6 +6,8 @@
 
 本仓库将这项已在该机器上验证的处理方式封装为带硬件检查的 systemd oneshot 服务和恢复钩子。它**不是 Linux 驱动**，不运行 Windows ISST 安装程序，不修改 PipeWire/WirePlumber 路由、默认输出或蓝牙配置。
 
+> 2026-11-02 复核：本机从休眠恢复时，sleep hook 与开机服务均成功执行；仓库同时收紧了 DMI 版本校验、移除了已弃用的 udev settle 依赖，并让安装器在重复安装时重启服务。
+
 ## 配套博文
 
 完整排查过程、硬件识别、寄存器验证与持久化修复记录见：[HUAWEI MateBook D 15 2022（BoF-XX-PCB）Ubuntu Linux 外放无声修复](https://xingwangzhe.fun/posts/matebook-d15-bofxx-hwsp0001-no-speaker/)。
@@ -16,18 +18,18 @@
 | --- | --- |
 | 华为产品系列 | HUAWEI MateBook D 15 2022 第 12 代 Intel Core 系列；华为官方支持设备列表将产品代码 `BoF` 对应到该系列 |
 | Linux DMI 产品名 / 版本 | `BoF-XX` / `M1010` |
-| Linux DMI 主板名 | `BoF-XX-PCB` |
+| Linux DMI 主板名 / 版本 | `BoF-XX-PCB` / `M1010` |
 | 测试时的系统 / 内核 | Ubuntu 26.04.1 LTS，`7.0.0-38-generic` |
 | 音频控制器 | Intel Alder Lake PCH-P HDA，PCI ID `8086:51c8` |
 | 内核音频链路 | SOF（`sof-audio-pci-intel-tgl`）和 ES8336 codec（`sof-essx8336`） |
 | 额外 ACPI 设备 | `HWSP0001:00`，位于 I²C 总线 3 |
 | 实测功放地址 | `0x58`、`0x5b`；两者寄存器 `0x00` 均读为 `0x5a` |
 
-产品系列对应关系参考华为[支持设备列表](https://consumer.huawei.com/cn/support/content/zh-cn15945089/)。`BoF-XX` 是本机 DMI 字符串；脚本检查本机的精确 DMI 值，不假设所有 MateBook D 15 都使用相同主板。
+产品系列对应关系参考华为[支持设备列表](https://consumer.huawei.com/cn/support/content/zh-cn15945089/)。`BoF-XX` 是本机 DMI 字符串；脚本检查厂商、产品名、产品版本、主板名和主板版本这五个精确 DMI 值，不假设所有 MateBook D 15 都使用相同主板。
 
 ## 排查过程与证据
 
-内核成功创建了 `sof-essx8336` ALSA 声卡，PipeWire 也暴露了 Speakers 输出。SOF firmware 和 `sof-adl-es8336-dmic2ch-ssp0.tplg` topology 均已加载，因此问题不是“Linux 完全没有识别声卡”，也不是缺少 Windows 驱动。用户提供的 Windows 压缩包中包含 `ISST_10.29.0.7767.exe`，这是 Windows 安装程序，不能作为 Linux 内核模块使用。
+内核成功创建了 `sof-essx8336` ALSA 声卡，PipeWire 也暴露了 Speakers 输出。SOF firmware 和 `sof-adl-es8336-dmic2ch-ssp0.tplg` topology 均已加载，因此问题不是“Linux 完全没有识别声卡”，也不是缺少 Windows 驱动。用户提供的 Windows 压缩包中包含 `ISST_10.29.0.7767.exe`。用 7z 解包、再用 REA 检查驱动导入表后可以确认：外层是 NSIS 自解压器，内层 `ISST_P99-022-002_v10.29.00.7767.exe` 解包后是 Intel SST 驱动栈（`IntcSST.sys`、`IntcOED.sys`、`IntcSDW.sys`、`IntcDMic.sys`、`IntcAudioBus.sys` 等）、WoV 模型和拓扑文件；`IntcSST.sys` 的导入表只依赖 `ntoskrnl.exe`、`portcls.sys` 和 `HAL.dll`。整包中没有发现 `HWSP0001` 或 `ES8336` 的驱动/字符串。因此它既不能作为 Linux 内核模块加载，也不包含这颗功放的初始化代码，不能替代本文的寄存器配置。
 
 系统还枚举出独立的 `HWSP0001:00`，但没有绑定 Linux I²C 驱动。只读检查发现总线 3 上的 `0x58`、`0x5b` 器件：初始化前两者的寄存器 `0x00` 均为 `0x5a`、寄存器 `0x01` 均为 `0x38`。应用下方配置后，两者的寄存器 `0x01` 读回 `0x69`；用户随后确认内置扬声器恢复了声音。
 
@@ -51,9 +53,9 @@
 pkexec bash "$(pwd)/scripts/install.sh"
 ```
 
-安装器会拒绝不匹配的厂商、产品名、主板、总线布局、已绑定的内核驱动或异常器件标识值。运行时初始化脚本在每次写入前也会重新检查。它会向 `0x58`、`0x5b` 各写入 14 组寄存器/数值，然后读取并验证可读回的配置寄存器。
+安装器会拒绝不匹配的厂商、产品名、产品版本、主板名、主板版本、总线布局、已绑定的内核驱动或异常器件标识值。运行时初始化脚本在每次写入前也会重新检查。安装完成后会重启服务，使当前 profile 立即生效；重复安装也会重新应用，而不是因为服务已经 active 就跳过。它会向 `0x58`、`0x5b` 各写入 14 组寄存器/数值，然后读取并验证可读回的配置寄存器。
 
-systemd 服务在开机时初始化功放；睡眠恢复钩子会在系统恢复后调用同一个受检查的脚本。脚本不会调用 `wpctl`、`pactl`、PipeWire 或 WirePlumber，也不会选择输出设备。你仍可像平常一样在桌面音频设置中选择内置扬声器或蓝牙设备。
+systemd 服务在开机时初始化功放；睡眠恢复钩子会在系统恢复后调用同一个受检查的脚本。服务不再依赖已弃用的 `systemd-udev-settle.service`，改为在脚本里短暂等待 `HWSP0001:00` 和 `/dev/i2c-3` 出现。脚本不会调用 `wpctl`、`pactl`、PipeWire 或 WirePlumber，也不会选择输出设备。你仍可像平常一样在桌面音频设置中选择内置扬声器或蓝牙设备。
 
 ## 验证与卸载
 
